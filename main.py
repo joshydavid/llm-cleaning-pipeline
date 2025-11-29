@@ -1,24 +1,22 @@
 import json
 import math
-import os
 import time
 
 import pandas as pd
 import requests
-from dotenv import load_dotenv
 from openai import OpenAI
 
-load_dotenv()
-
-# =====================
-# === CONFIGURATION ===
-# =====================
-AIB_DATASET = "aib-dataset.csv"
-OUTPUT_FILENAME = "aib-dataset_cleaned.csv"
-LM_STUDIO_API = os.getenv("LM_STUDIO_API")
-LLM_MODEL_ = os.getenv("LLM_MODEL_", "llama-3-8b-instruct-1048k")
-BATCH_SIZE = int(os.getenv("BATCH_SIZE", "5"))
-MODEL_PARAMS_BILLIONS = float(os.getenv("MODEL_PARAMS_BILLIONS", "8"))
+from constants import (
+    AIB_DATASET,
+    BATCH_SIZE,
+    GOOGLE_BOOKS_API,
+    LLM_MODEL_,
+    LM_STUDIO_API,
+    MODEL_PARAMS_BILLIONS,
+    NUM_ROWS_TO_PROCESSED,
+    OUTPUT_FILENAME,
+    Role,
+)
 
 
 # ========================
@@ -38,9 +36,7 @@ def _fetch_book_context(title, author_hint):
         clean_author = author_hint.split(",")[0].strip()
         query += f"+inauthor:{clean_author}"
 
-    GOOGLE_BOOKS_API_URL = (
-        f"https://www.googleapis.com/books/v1/volumes?q={query}&maxResults=1"
-    )
+    GOOGLE_BOOKS_API_URL = f"{GOOGLE_BOOKS_API}?q={query}&maxResults=1"
 
     try:
         response = requests.get(GOOGLE_BOOKS_API_URL).json()
@@ -48,8 +44,14 @@ def _fetch_book_context(title, author_hint):
             info = response["items"][0]["volumeInfo"]
             identifiers = info.get("industryIdentifiers", [])
             found_isbn = next(
-                (i["identifier"] for i in identifiers if i["type"] == "ISBN_13"), "N/A"
+                (i["identifier"] for i in identifiers if i["type"] == "ISBN_13"), None
             )
+
+            if not found_isbn:
+                found_isbn = next(
+                    (i["identifier"] for i in identifiers if i["type"] == "ISBN_10"),
+                    "N/A",
+                )
 
             return {
                 "found_title": info.get("title", "N/A"),
@@ -111,27 +113,7 @@ def _clean_batch_with_llm(batch_context, client):
     """
 
     input_json = json.dumps(batch_context, indent=2, ensure_ascii=False)
-    prompt = f"""
-     You are a Data Cleaning Assistant using Retrieval-Augmented Generation (RAG).
-     I will provide a list of books with "original_data" (which may have typos/missing values)
-     and "retrieved_context" (data found from a trusted Google Books API).
-
-     YOUR TASKS:
-     1. Correct the Author and Title using the 'retrieved_context'.
-     2. Fill MISSING Year and Pages using 'retrieved_context'.
-     3. Fix the ISBN using 'retrieved_context'.
-     4. Correct Series information using 'found_subtitle'
-     5. Classify Sales based on 'found_ratings_count':
-         - > 100 ratings = "High Sales"
-         - > 10 ratings = "Medium Sales"
-         - < 10 ratings = "Low Sales"
-
-     INPUT DATA:
-     {input_json}
-
-     OUTPUT ONLY a valid JSON array with the following keys:
-     Title, Author, Year, ISBN, Series, Pages, Sales
-     """
+    prompt = _generate_prompt(input_json)
 
     start_time = time.time()
     try:
@@ -139,10 +121,10 @@ def _clean_batch_with_llm(batch_context, client):
             model=LLM_MODEL_,
             messages=[
                 {
-                    "role": "system",
+                    "role": Role.SYSTEM,
                     "content": "You are a JSON-only API. Never add explanations.",
                 },
-                {"role": "user", "content": prompt},
+                {"role": Role.USER, "content": prompt},
             ],
             temperature=0.1,
             max_tokens=2500,
@@ -157,6 +139,41 @@ def _clean_batch_with_llm(batch_context, client):
     except Exception as e:
         print(f" > LLM call failed: {e}")
         return None, 0, 0
+
+
+def _generate_prompt(input_json):
+    prompt = f"""
+     You are a Data Cleaning Assistant. Your goal is to produce a CLEAN dataset by
+     comparing "original_data" (potentially messy) with "retrieved_context"
+     (Google Books API ground truth) to produce a fxinal validated record.
+
+     ## YOUR TASKS (Follow these 7 steps strictly):
+     --- FILL MISSING VALUES ---
+         1. **Publication Year**: If 'Year' is missing in original_data, fill it using 'retrieved_context'.
+         2. **Authors**: Fill using 'retrieved_context'. **IMPORTANT**: If the API provides a list (e.g., ["Name A", "Name B"]), join them into a single string separated by commas.
+         3. **Page Count**: Fill using 'retrieved_context'. Ensure it is an Integer.
+
+     --- CORRECT ERRORS ---
+         4. **Author Correction**: Compare original vs. retrieved. If the original Author has typos or is incorrect, overwrite it with the 'retrieved_context' author.
+         5. **Code (ISBN) Correction**: Check the 'ISBN'. If it looks invalid or differs from the 'found_isbn' in 'retrieved_context', use the retrieved ISBN.
+         6. **Series Extraction**: Check 'found_subtitle' or 'found_title'. Only extract if it clearly looks like a series (e.g., contains "Vol", "Book 1", "Trilogy"). Ignore generic descriptions like "A Novel".
+
+     --- CLASSIFICATION ---
+        **7. Sales Classification**: Calculate "Sales" based on 'found_ratings_count' (int):
+            - "High Sales": if there are **more than 100** ratings.
+            - "Medium Sales": if there are **more than 10 but 100 or fewer** ratings.
+            - "Low Sales": if there are **10 or fewer** ratings (or if ratings are missing).
+
+     ## INPUT DATA:
+     {input_json}
+
+     ## OUTPUT Format:
+     - Return a JSON LIST of objects.
+         - Keys must be: "Title", "Author", "Year" (int), "ISBN" (string), "Series", "Pages" (int), "Sales".
+         - No Markdown. No Code Blocks. Just the raw JSON string.
+     """
+
+    return prompt
 
 
 # ==========================
@@ -181,12 +198,10 @@ if __name__ == "__main__":
             }
         )
 
-        df["Year"] = df["Year"].astype("Int64")
-        df["Pages"] = df["Pages"].astype("Int64")
-
-        # ROWS = 5
-        # print(f"Limiting processing to the first {ROWS} rows for testing...")
-        # df = df.head(ROWS).copy()
+        print(
+            f"Limiting processing to the first {NUM_ROWS_TO_PROCESSED} rows for testing..."
+        )
+        df = df.head(NUM_ROWS_TO_PROCESSED).copy()
 
         all_results = []
         total_flops = 0
@@ -224,6 +239,12 @@ if __name__ == "__main__":
         # 4. FINAL OUTPUT & SAVING
         if all_results:
             final_df = pd.DataFrame(all_results)
+
+            final_df["Year"] = pd.to_numeric(final_df["Year"], errors="coerce")
+            final_df["Pages"] = pd.to_numeric(final_df["Pages"], errors="coerce")
+
+            final_df["Year"] = final_df["Year"].astype("Int64")
+            final_df["Pages"] = final_df["Pages"].astype("Int64")
 
             print("\n" + "=" * 40)
             print("       FINAL DATA PREVIEW")
