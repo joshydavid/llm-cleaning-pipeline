@@ -46,11 +46,18 @@ def _fetch_book_context(title, author_hint):
         response = requests.get(GOOGLE_BOOKS_API_URL).json()
         if "items" in response and len(response["items"]) > 0:
             info = response["items"][0]["volumeInfo"]
+            identifiers = info.get("industryIdentifiers", [])
+            found_isbn = next(
+                (i["identifier"] for i in identifiers if i["type"] == "ISBN_13"), "N/A"
+            )
+
             return {
                 "found_title": info.get("title", "N/A"),
+                "found_subtitle": info.get("subtitle", "N/A"),
                 "found_authors": info.get("authors", ["N/A"]),
                 "found_year": info.get("publishedDate", "N/A")[:4],
                 "found_pages": info.get("pageCount", "N/A"),
+                "found_isbn": found_isbn,
                 "found_ratings_count": info.get("ratingsCount", 0),
             }
         return "Book not found in external database."
@@ -111,9 +118,10 @@ def _clean_batch_with_llm(batch_context, client):
 
      YOUR TASKS:
      1. Correct the Author and Title using the 'retrieved_context'.
-     2. FILL MISSING Year and Pages using 'retrieved_context'.
-     3. Fix the ISBN if possible.
-     4. Classify Sales based on 'found_ratings_count':
+     2. Fill MISSING Year and Pages using 'retrieved_context'.
+     3. Fix the ISBN using 'retrieved_context'.
+     4. Correct Series information using 'found_subtitle'
+     5. Classify Sales based on 'found_ratings_count':
          - > 100 ratings = "High Sales"
          - > 10 ratings = "Medium Sales"
          - < 10 ratings = "Low Sales"
@@ -176,8 +184,9 @@ if __name__ == "__main__":
         df["Year"] = df["Year"].astype("Int64")
         df["Pages"] = df["Pages"].astype("Int64")
 
-        print("Limiting processing to the first 10 rows for testing...")
-        df = df.head(50).copy()
+        # ROWS = 5
+        # print(f"Limiting processing to the first {ROWS} rows for testing...")
+        # df = df.head(ROWS).copy()
 
         all_results = []
         total_flops = 0
