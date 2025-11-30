@@ -10,8 +10,13 @@ load_dotenv()
 # ======================
 AIB_DATASET = "aib-dataset.csv"
 OUTPUT_FILENAME = "aib-dataset_cleaned.csv"
-LM_STUDIO_API = os.getenv("LM_STUDIO_API")
+
+LM_STUDIO_API_BASE_URL = os.getenv("LM_STUDIO_API_BASE_URL")
 LLM_MODEL_ = os.getenv("LLM_MODEL_", "llama-3-8b-instruct-1048k")
+
+OLLAMA_API_BASE_URL = os.getenv("OLLAMA_API_BASE_URL")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL")
+
 GOOGLE_BOOKS_API = os.getenv("GOOGLE_BOOKS_API")
 BATCH_SIZE = int(os.getenv("BATCH_SIZE", "5"))
 MODEL_PARAMS_BILLIONS = float(os.getenv("MODEL_PARAMS_BILLIONS", "8"))

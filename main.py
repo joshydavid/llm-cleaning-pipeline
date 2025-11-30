@@ -10,10 +10,10 @@ from constants import (
     AIB_DATASET,
     BATCH_SIZE,
     GOOGLE_BOOKS_API,
-    LLM_MODEL_,
-    LM_STUDIO_API,
     MODEL_PARAMS_BILLIONS,
     NUM_ROWS_TO_PROCESSED,
+    OLLAMA_API_BASE_URL,
+    OLLAMA_MODEL,
     OUTPUT_FILENAME,
     Role,
 )
@@ -118,7 +118,7 @@ def _clean_batch_with_llm(batch_context, client):
     start_time = time.time()
     try:
         response = client.chat.completions.create(
-            model=LLM_MODEL_,
+            model=OLLAMA_MODEL,
             messages=[
                 {
                     "role": Role.SYSTEM,
@@ -182,7 +182,7 @@ def _generate_prompt(input_json):
 if __name__ == "__main__":
     try:
         # 1. SETUP
-        client = OpenAI(base_url=LM_STUDIO_API, api_key="lm-studio")
+        client = OpenAI(base_url=OLLAMA_API_BASE_URL, api_key="ollama")
         print(f"Loading {AIB_DATASET}...")
         df = pd.read_csv(AIB_DATASET)
 
