@@ -12,7 +12,7 @@ AIB_DATASET = "aib-dataset.csv"
 OUTPUT_FILENAME = "aib-dataset_cleaned.csv"
 
 LM_STUDIO_API_BASE_URL = os.getenv("LM_STUDIO_API_BASE_URL")
-LLM_MODEL_ = os.getenv("LLM_MODEL_", "llama-3-8b-instruct-1048k")
+LLM_MODEL = os.getenv("LLM_MODEL", "llama-3-8b-instruct-1048k")
 
 OLLAMA_API_BASE_URL = os.getenv("OLLAMA_API_BASE_URL")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL")
