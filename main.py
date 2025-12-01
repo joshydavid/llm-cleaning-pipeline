@@ -95,15 +95,15 @@ def _retrieve_book_context(batch_df):
     print(f" > Retrieving context for {len(batch_df)} books...")
     for idx, row in batch_df.iterrows():
         external_info = _fetch_book_context(row["Title"], row["Author"])
-        batch_context.append(
-            {
-                "id": idx,
-                "original_data": row[
-                    ["Title", "Author", "Year", "ISBN", "Series", "Pages"]
-                ].to_dict(),
-                "retrieved_context": external_info,
-            }
-        )
+        content = {
+            "id": idx,
+            "original_data": row[
+                ["Title", "Author", "Year", "ISBN", "Series", "Pages"]
+            ].to_dict(),
+            "retrieved_context": external_info,
+        }
+
+        batch_context.append(content)
     return batch_context
 
 
@@ -145,7 +145,7 @@ def _generate_prompt(input_json):
     prompt = f"""
      You are a Data Cleaning Assistant. Your goal is to produce a CLEAN dataset by
      comparing "original_data" (potentially messy) with "retrieved_context"
-     (Google Books API ground truth) to produce a fxinal validated record.
+     (Google Books API ground truth) to produce a final validated record.
 
      ## YOUR TASKS (Follow these 7 steps strictly):
      --- FILL MISSING VALUES ---
