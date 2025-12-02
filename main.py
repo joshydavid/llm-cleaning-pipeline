@@ -73,12 +73,21 @@ def _fetch_book_context(title, author_hint):
 def process_batch_with_rag(
     batch_df: pd.DataFrame, client: OpenAI
 ) -> Tuple[List[Dict], float]:
+    # 1. Retrieve Context (Input for LLM)
     batch_context = _retrieve_book_context(batch_df)
+
+    # 2. Clean Data with LLM
     results, duration = _clean_batch_with_llm(batch_context, client)
+
+    # 3. Calculate Accuracy
+    if results:
+        results_with_accuracy = _calculate_accuracy(results, batch_context)
+        return results_with_accuracy, duration
+
     return results or [], duration
 
 
-def _retrieve_book_context(batch_df: pd.DataFrame) -> List[Dict]:
+def _retrieve_book_context(batch_df):
     """
     Step 1: Retrieve ground-truth book info from Google Books API for the batch.
     """
@@ -167,10 +176,68 @@ def _generate_prompt(input_json: str) -> str:
             - Series: str
             - Pages: int
             - Sales: str
+            - id: str
         - No Markdown. No Code Blocks. Just the raw JSON string.
      """
 
     return prompt
+
+
+def _calculate_accuracy(
+    cleaned_data: List[Dict], context_data: List[Dict]
+) -> List[Dict]:
+    """
+    Compares the LLM's cleaned output against the Ground Truth context.
+    """
+
+    context_map = {
+        item["id"]: item["retrieved_context"]
+        for item in context_data
+        if isinstance(item["retrieved_context"], dict)
+    }
+
+    results_with_metrics: List[Dict] = []
+
+    for item in cleaned_data:
+        current_id = item.get("id")
+        gt = context_map.get(current_id)
+
+        if gt and isinstance(gt, dict):
+            # Author Accuracy
+            llm_authors_raw = item.get("Author")
+            gt_authors_raw = gt.get("found_authors")
+            is_author_match = False
+
+            if llm_authors_raw and isinstance(gt_authors_raw, list):
+                llm_authors_set = set(
+                    name.strip().lower()
+                    for name in str(llm_authors_raw).split(",")
+                    if name.strip()
+                )
+
+                gt_authors_set = set(name.strip().lower() for name in gt_authors_raw)
+                is_author_match = llm_authors_set == gt_authors_set
+
+            item["Accuracy_Author"] = "Match" if is_author_match else "Mismatch"
+
+            # Year Accuracy
+            llm_year = str(item.get("Year")).strip()
+            gt_year = str(gt.get("found_year")).strip()
+            item["Accuracy_Year"] = "Match" if llm_year == gt_year else "Mismatch"
+
+            # ISBN Accuracy
+            llm_isbn = str(item.get("ISBN")).strip().replace("-", "")
+            gt_isbn = str(gt.get("found_isbn")).strip().replace("-", "")
+            item["Accuracy_ISBN"] = "Match" if llm_isbn == gt_isbn else "Mismatch"
+
+            # Pages Accuracy
+            llm_pages = str(item.get("Pages")).strip()
+            gt_pages = str(gt.get("found_pages")).strip()
+            item["Accuracy_Pages"] = "Match" if llm_pages == gt_pages else "Mismatch"
+
+        results_with_metrics.append(item)
+
+    return results_with_metrics
 
 
 # ==========================
@@ -240,12 +307,35 @@ if __name__ == "__main__":
 
             final_df["Year"] = final_df["Year"].astype("Int64")
             final_df["Pages"] = final_df["Pages"].astype("Int64")
+            final_df = final_df.drop(columns=["id"], errors="ignore")
 
             print("\n" + "=" * 40)
             print("       FINAL DATA PREVIEW")
             print("=" * 40 + "\n")
             print(final_df.head(10).to_string(index=False))
-            print("\n" + "-" * 40)
+
+            accuracy_cols = [
+                col for col in final_df.columns if col.startswith("Accuracy_")
+            ]
+
+            if accuracy_cols:
+                total_records = len(final_df)
+
+                print("\n" + "=" * 40)
+                print("       ACCURACY SUMMARY")
+                print("=" * 40)
+
+                for col in accuracy_cols:
+                    match_count = (final_df[col] == "Match").sum()
+                    accuracy_percent = (match_count / total_records) * 100
+                    metric_name = col.replace("Accuracy_", "")
+
+                    print(
+                        f" {metric_name:<15}: {match_count} / {total_records} = {accuracy_percent:.2f}%"
+                    )
+
+                print("-" * 40)
+
             print(f"Total Processing Time: {total_time:.2f}s")
 
             final_df.to_csv(OUTPUT_FILENAME, index=False)
