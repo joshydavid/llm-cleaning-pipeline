@@ -1,6 +1,7 @@
 import json
 import math
 import time
+from typing import Dict, List, Tuple
 
 import pandas as pd
 import requests
@@ -12,7 +13,6 @@ from constants import (
     GOOGLE_BOOKS_API,
     LLM_MODEL,
     LM_STUDIO_API_BASE_URL,
-    MODEL_PARAMS_BILLIONS,
     NUM_ROWS_TO_PROCESSED,
     OUTPUT_FILENAME,
     Role,
@@ -68,25 +68,17 @@ def _fetch_book_context(title, author_hint):
 
 
 # =======================
-# === FLOPS ESTIMATOR ===
-# =======================
-def estimate_flops(input_text, output_text, model_params_billions):
-    # Rough token estimation (1 word ~= 1.3 tokens)
-    in_tok = len(input_text.split()) * 1.3
-    out_tok = len(output_text.split()) * 1.3
-    return 2 * (model_params_billions * 1e9) * (in_tok + out_tok)
-
-
-# =======================
 # === MAIN PROCESSING ===
 # =======================
-def process_batch_with_rag(batch_df, client):
+def process_batch_with_rag(
+    batch_df: pd.DataFrame, client: OpenAI
+) -> Tuple[List[Dict], float]:
     batch_context = _retrieve_book_context(batch_df)
-    results, duration, flops = _clean_batch_with_llm(batch_context, client)
-    return results or [], duration, flops
+    results, duration = _clean_batch_with_llm(batch_context, client)
+    return results or [], duration
 
 
-def _retrieve_book_context(batch_df):
+def _retrieve_book_context(batch_df: pd.DataFrame) -> List[Dict]:
     """
     Step 1: Retrieve ground-truth book info from Google Books API for the batch.
     """
@@ -131,17 +123,16 @@ def _clean_batch_with_llm(batch_context, client):
         )
         content = response.choices[0].message.content.strip()
         duration = time.time() - start_time
-        flops = estimate_flops(prompt, content, MODEL_PARAMS_BILLIONS)
         clean_json = content.removeprefix("```json").removesuffix("```").strip()
         data = json.loads(clean_json)
-        return data, duration, flops
+        return data, duration
 
     except Exception as e:
         print(f" > LLM call failed: {e}")
-        return None, 0, 0
+        return None, 0
 
 
-def _generate_prompt(input_json):
+def _generate_prompt(input_json: str) -> str:
     prompt = f"""
      You are a Data Cleaning Assistant. Your goal is to produce a CLEAN dataset by
      comparing "original_data" (potentially messy) with "retrieved_context"
@@ -168,9 +159,15 @@ def _generate_prompt(input_json):
      {input_json}
 
      ## OUTPUT Format:
-     - Return a JSON LIST of objects.
-         - Keys must be: "Title", "Author", "Year" (int), "ISBN" (string), "Series", "Pages" (int), "Sales".
-         - No Markdown. No Code Blocks. Just the raw JSON string.
+        - Your response MUST be a JSON array (list) of objects.
+            - Title: str
+            - Author: str
+            - Year: int
+            - ISBN: str
+            - Series: str
+            - Pages: int
+            - Sales: str
+        - No Markdown. No Code Blocks. Just the raw JSON string.
      """
 
     return prompt
@@ -204,7 +201,6 @@ if __name__ == "__main__":
         df = df.head(NUM_ROWS_TO_PROCESSED).copy()
 
         all_results = []
-        total_flops = 0
         total_time = 0
 
         # 3. BATCH PROCESSING LOOP
@@ -221,14 +217,13 @@ if __name__ == "__main__":
             )
 
             # Run RAG Pipeline
-            results, duration, flops = process_batch_with_rag(batch, client)
+            results, duration = process_batch_with_rag(batch, client)
 
             if results:
                 print(
                     f"   > ✅ Success. {len(results)} items cleaned in {duration:.2f}s"
                 )
                 all_results.extend(results)
-                total_flops += flops
                 total_time += duration
             else:
                 print("   > ⚠️ Batch failed. Using original data as fallback.")
@@ -252,7 +247,6 @@ if __name__ == "__main__":
             print(final_df.head(10).to_string(index=False))
             print("\n" + "-" * 40)
             print(f"Total Processing Time: {total_time:.2f}s")
-            print(f"Total Estimated FLOPs: {total_flops:.2e}")
 
             final_df.to_csv(OUTPUT_FILENAME, index=False)
             print(f"\n✅ Saved cleaned dataset to: {OUTPUT_FILENAME}")
