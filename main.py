@@ -234,6 +234,12 @@ def _calculate_accuracy(
             llm_pages = str(item.get("Pages")).strip()
             gt_pages = str(gt.get("found_pages")).strip()
             item["Accuracy_Pages"] = "Match" if llm_pages == gt_pages else "Mismatch"
+        else:
+            missing_context = "N/A"
+            item["Accuracy_Author"] = missing_context
+            item["Accuracy_Year"] = missing_context
+            item["Accuracy_ISBN"] = missing_context
+            item["Accuracy_Pages"] = missing_context
 
         results_with_metrics.append(item)
 
