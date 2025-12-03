@@ -216,5 +216,5 @@ __marimo__/
 .streamlit/secrets.toml
 
 .DS_Store
-aib-dataset.csv
-aib-dataset_cleaned.csv
+data/aib-dataset.csv
+data/aib-dataset_cleaned.csv
