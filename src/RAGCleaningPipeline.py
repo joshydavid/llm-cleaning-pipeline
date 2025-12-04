@@ -132,6 +132,7 @@ class RAGCleaningPipeline:
         """
         Step 3: Compares the LLM's cleaned output against the Ground Truth context.
         """
+
         context_map = {
             item["id"]: item["retrieved_context"]
             for item in context_data
@@ -196,6 +197,7 @@ class RAGCleaningPipeline:
         """
         Orchestrates the RAG pipeline for a single batch.
         """
+
         # 1. Retrieve Context (Input for LLM)
         batch_context = self._retrieve_book_context(batch_df)
 
